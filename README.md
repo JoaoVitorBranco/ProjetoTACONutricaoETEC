@@ -137,3 +137,6 @@ pyinstaller --onefile --windowed --name "CardapioNutricional" --add-data "taco/T
 O executável gerado fica em `dist/`. Basta distribuir esse único arquivo — sem precisar instalar Python ou qualquer dependência.
 
 > Para disponibilizar no GitHub, acesse **Releases → Create a new release** e faça upload do executável gerado.
+
+
+pyinstaller --clean --onefile --windowed --name "ProjetoTACO" --add-data "taco/Taco.xlsx;taco" --add-data "logo.ico;." --icon=logo.ico main.py

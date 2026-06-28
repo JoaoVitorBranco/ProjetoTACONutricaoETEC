@@ -388,41 +388,44 @@ def gerar_template_importacao(caminho_arquivo: str):
 
 def exportar_alimentos_para_excel(caminho_arquivo: str, apenas_usuario: bool = False) -> int:
     """Exporta alimentos para Excel. Se apenas_usuario=True, exporta só fonte='usuario'."""
-    import pandas as pd
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
 
     conn = get_connection()
-
     if apenas_usuario:
-        query = """
-            SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos
-            FROM alimentos
-            WHERE fonte = 'usuario'
-            ORDER BY grupo, descricao
-        """
+        query = "SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos FROM alimentos WHERE fonte = 'usuario' ORDER BY grupo, descricao"
     else:
-        query = """
-            SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos
-            FROM alimentos
-            ORDER BY grupo, descricao
-        """
+        query = "SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos FROM alimentos ORDER BY grupo, descricao"
 
-    df = pd.read_sql_query(query, conn)
+    rows = conn.execute(query).fetchall()
     conn.close()
-    
-    # Renomear colunas para ficar mais legível
-    df.rename(columns={
-        'grupo': 'Grupo',
-        'descricao': 'Descrição',
-        'calorias': 'Calorias (kcal)',
-        'proteinas': 'Proteínas (g)',
-        'carboidratos': 'Carboidratos (g)',
-        'lipideos': 'Lipídeos (g)',
-    }, inplace=True)
-    
-    # Salvar
-    df.to_excel(caminho_arquivo, index=False, engine='openpyxl')
-    
-    return len(df)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Alimentos"
+
+    headers = ["Grupo", "Descrição", "Calorias (kcal)", "Proteínas (g)", "Carboidratos (g)", "Lipídeos (g)"]
+    larguras = [28, 42, 16, 15, 17, 15]
+
+    for col_idx, (nome, largura) in enumerate(zip(headers, larguras), 1):
+        cell = ws.cell(row=1, column=col_idx, value=nome)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="2D6A4F", end_color="2D6A4F", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.column_dimensions[cell.column_letter].width = largura
+
+    ws.freeze_panes = "A2"
+
+    for row_idx, row in enumerate(rows, 2):
+        ws.cell(row=row_idx, column=1, value=row["grupo"])
+        ws.cell(row=row_idx, column=2, value=row["descricao"])
+        ws.cell(row=row_idx, column=3, value=row["calorias"])
+        ws.cell(row=row_idx, column=4, value=row["proteinas"])
+        ws.cell(row=row_idx, column=5, value=row["carboidratos"])
+        ws.cell(row=row_idx, column=6, value=row["lipideos"])
+
+    wb.save(caminho_arquivo)
+    return len(rows)
 
 
 def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
@@ -431,51 +434,51 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
     Valida a fonte (TACO vs usuário) comparando com a TACO embutida.
     Retorna dict com estatísticas: {criados, atualizados, erros, detalhes_erros}
     """
-    import pandas as pd
+    import openpyxl
     import os
     import sys
-    
-    # Lê o Excel do usuário
+
     try:
-        df = pd.read_excel(caminho_arquivo, engine='openpyxl')
+        wb = openpyxl.load_workbook(caminho_arquivo, read_only=True, data_only=True)
+        ws = wb.active
     except Exception as e:
         raise ValueError(f"Erro ao ler arquivo Excel: {str(e)}")
-    
-    # Valida colunas (SEM fonte)
-    colunas_esperadas = ['Grupo', 'Descrição', 'Calorias (kcal)', 'Proteínas (g)', 
-                         'Carboidratos (g)', 'Lipídeos (g)']
-    
+
+    headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+
+    colunas_esperadas = ['Grupo', 'Descrição', 'Calorias (kcal)', 'Proteínas (g)', 'Carboidratos (g)', 'Lipídeos (g)']
     for col in colunas_esperadas:
-        if col not in df.columns:
+        if col not in headers:
             raise ValueError(f"Coluna '{col}' não encontrada no arquivo Excel.")
-    
+
+    col_idx = {nome: headers.index(nome) for nome in colunas_esperadas}
+
     # Carrega TACO embutida para validação de fonte
     if getattr(sys, 'frozen', False):
-        # Executável
         base_path = sys._MEIPASS
     else:
-        # Desenvolvimento
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
+
     caminho_taco = os.path.join(base_path, "taco", "Taco.xlsx")
-    
-    # Lê TACO para criar conjunto de alimentos TACO
     alimentos_taco = set()
     try:
-        df_taco = pd.read_excel(caminho_taco, usecols=["Grupo", "Descrição do Alimento"])
-        for _, row in df_taco.iterrows():
-            grupo = str(row['Grupo']).strip().lower()
-            desc = str(row['Descrição do Alimento']).strip().lower()
-            if grupo != 'nan' and desc != 'nan':
-                alimentos_taco.add((grupo, desc))
-    except:
-        # Se não conseguir ler TACO, continua sem validação de fonte
+        wb_taco = openpyxl.load_workbook(caminho_taco, read_only=True, data_only=True)
+        ws_taco = wb_taco.active
+        taco_headers = [cell.value for cell in next(ws_taco.iter_rows(min_row=1, max_row=1))]
+        gi = taco_headers.index("Grupo") if "Grupo" in taco_headers else None
+        di = taco_headers.index("Descrição do Alimento") if "Descrição do Alimento" in taco_headers else None
+        if gi is not None and di is not None:
+            for trow in ws_taco.iter_rows(min_row=2, values_only=True):
+                g = str(trow[gi] or "").strip().lower()
+                d = str(trow[di] or "").strip().lower()
+                if g and d and g != 'none' and d != 'none':
+                    alimentos_taco.add((g, d))
+        wb_taco.close()
+    except Exception:
         pass
-    
+
     conn = get_connection()
     cursor = conn.cursor()
-
-    # Carrega grupos uma vez antes do loop (evita 1 query SQL por linha)
     grupos_existentes = set(listar_grupos())
 
     criados = 0
@@ -483,23 +486,20 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
     erros = 0
     detalhes_erros = []
 
-    for idx, row in df.iterrows():
-        linha = idx + 2  # +2 porque Excel começa em 1 e tem cabeçalho
-
+    for linha, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         try:
-            # Validações de texto
-            grupo = str(row['Grupo']).strip()
-            descricao = str(row['Descrição']).strip()
+            grupo = str(row[col_idx['Grupo']] or "").strip()
+            descricao = str(row[col_idx['Descrição']] or "").strip()
 
-            if not grupo or grupo == 'nan':
+            if not grupo or grupo == 'None':
                 raise ValueError("Grupo vazio")
-            if not descricao or descricao == 'nan':
+            if not descricao or descricao == 'None':
                 raise ValueError("Descrição vazia")
 
-            calorias = float(row['Calorias (kcal)'])
-            proteinas = float(row['Proteínas (g)'])
-            carboidratos = float(row['Carboidratos (g)'])
-            lipideos = float(row['Lipídeos (g)'])
+            calorias = float(row[col_idx['Calorias (kcal)']] or 0)
+            proteinas = float(row[col_idx['Proteínas (g)']] or 0)
+            carboidratos = float(row[col_idx['Carboidratos (g)']] or 0)
+            lipideos = float(row[col_idx['Lipídeos (g)']] or 0)
 
             if any(v < 0 for v in [calorias, proteinas, carboidratos, lipideos]):
                 raise ValueError("Valores negativos")
@@ -509,11 +509,9 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
                     f"Soma de macros ({proteinas + carboidratos + lipideos:.1f}g) excede 100g por 100g de alimento"
                 )
 
-            # Determina fonte: verifica se está na TACO embutida
             chave = (grupo.lower(), descricao.lower())
             fonte = 'taco' if chave in alimentos_taco else 'usuario'
 
-            # Cria grupo se não existir (usando set em memória — sem query extra por linha)
             if grupo not in grupos_existentes:
                 try:
                     criar_grupo(grupo)
@@ -522,7 +520,6 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
                     if 'já existe' not in str(e).lower():
                         raise
 
-            # Verifica se alimento já existe (grupo + descrição, case-insensitive)
             existe = cursor.execute("""
                 SELECT id, fonte FROM alimentos
                 WHERE LOWER(grupo) = LOWER(?) AND LOWER(descricao) = LOWER(?)
@@ -545,16 +542,12 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
         except Exception as e:
             erros += 1
             detalhes_erros.append(f"Linha {linha}: {str(e)}")
-    
+
+    wb.close()
     conn.commit()
     conn.close()
-    
-    return {
-        'criados': criados,
-        'atualizados': atualizados,
-        'erros': erros,
-        'detalhes_erros': detalhes_erros
-    }
+
+    return {'criados': criados, 'atualizados': atualizados, 'erros': erros, 'detalhes_erros': detalhes_erros}
 
 
 def restaurar_base_taco() -> int:
@@ -563,92 +556,83 @@ def restaurar_base_taco() -> int:
     Sobrescreve apenas alimentos com fonte='taco'.
     Retorna quantidade de alimentos restaurados.
     """
-    import pandas as pd
+    import openpyxl
     import os
     import sys
-    
-    # Localiza TACO embutida
+
     if getattr(sys, 'frozen', False):
-        # Executável
         base_path = sys._MEIPASS
     else:
-        # Desenvolvimento
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
+
     caminho_taco = os.path.join(base_path, "taco", "Taco.xlsx")
-    
+
     if not os.path.exists(caminho_taco):
         raise ValueError(f"Arquivo TACO não encontrado em: {caminho_taco}")
-    
-    # Lê o Excel da TACO
+
     try:
-        df = pd.read_excel(caminho_taco, usecols=[
-            "Grupo", "Descrição do Alimento", "Energia(kcal)", 
-            "Proteína(g)", "Lipídeos(g)", "Carboidrato(g)"
-        ])
+        wb = openpyxl.load_workbook(caminho_taco, read_only=True, data_only=True)
+        ws = wb.active
     except Exception as e:
         raise ValueError(f"Erro ao ler arquivo TACO: {str(e)}")
-    
-    # Renomeia colunas
-    df.rename(columns={
-        "Grupo": "grupo",
-        "Descrição do Alimento": "descricao",
-        "Energia(kcal)": "calorias",
-        "Proteína(g)": "proteinas",
-        "Lipídeos(g)": "lipideos",
-        "Carboidrato(g)": "carboidratos",
-    }, inplace=True)
-    
-    # Trata valores vazios como 0
-    for col in ["calorias", "proteinas", "lipideos", "carboidratos"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-    
-    # Remove linhas sem descrição
-    df.dropna(subset=["descricao"], inplace=True)
-    df["descricao"] = df["descricao"].str.strip()
-    df["grupo"] = df["grupo"].fillna("Sem grupo").str.strip()
-    
+
+    headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+
+    nomes_colunas = {
+        "grupo": "Grupo",
+        "descricao": "Descrição do Alimento",
+        "calorias": "Energia(kcal)",
+        "proteinas": "Proteína(g)",
+        "lipideos": "Lipídeos(g)",
+        "carboidratos": "Carboidrato(g)",
+    }
+    col_map = {}
+    for campo, nome in nomes_colunas.items():
+        if nome not in headers:
+            raise ValueError(f"Coluna obrigatória não encontrada no arquivo TACO: '{nome}'")
+        col_map[campo] = headers.index(nome)
+
+    def _safe_float(v):
+        try:
+            return round(float(v or 0), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
     conn = get_connection()
     cursor = conn.cursor()
-    
     restaurados = 0
-    
-    for _, row in df.iterrows():
-        # Verifica se o alimento existe com fonte='taco'
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        descricao = str(row[col_map["descricao"]] or "").strip()
+        if not descricao or descricao == "None":
+            continue
+
+        grupo = str(row[col_map["grupo"]] or "Sem grupo").strip()
+        calorias = _safe_float(row[col_map["calorias"]])
+        proteinas = _safe_float(row[col_map["proteinas"]])
+        lipideos = _safe_float(row[col_map["lipideos"]])
+        carboidratos = _safe_float(row[col_map["carboidratos"]])
+
         existe = cursor.execute("""
             SELECT id FROM alimentos
             WHERE LOWER(grupo) = LOWER(?) AND LOWER(descricao) = LOWER(?) AND fonte = 'taco'
-        """, (row['grupo'], row['descricao'])).fetchone()
-        
+        """, (grupo, descricao)).fetchone()
+
         if existe:
-            # Atualiza valores
             cursor.execute("""
                 UPDATE alimentos
                 SET calorias = ?, proteinas = ?, lipideos = ?, carboidratos = ?
                 WHERE id = ?
-            """, (
-                round(float(row['calorias']), 2),
-                round(float(row['proteinas']), 2),
-                round(float(row['lipideos']), 2),
-                round(float(row['carboidratos']), 2),
-                existe['id']
-            ))
-            restaurados += 1
+            """, (calorias, proteinas, lipideos, carboidratos, existe['id']))
         else:
-            # Alimento TACO não existe (pode ter sido deletado) - recria
             cursor.execute("""
                 INSERT INTO alimentos (grupo, descricao, calorias, proteinas, lipideos, carboidratos, fonte)
                 VALUES (?, ?, ?, ?, ?, ?, 'taco')
-            """, (
-                row['grupo'],
-                row['descricao'],
-                round(float(row['calorias']), 2),
-                round(float(row['proteinas']), 2),
-                round(float(row['lipideos']), 2),
-                round(float(row['carboidratos']), 2),
-            ))
-            restaurados += 1
-    
+            """, (grupo, descricao, calorias, proteinas, lipideos, carboidratos))
+
+        restaurados += 1
+
+    wb.close()
     conn.commit()
     conn.close()
 

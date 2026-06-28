@@ -1,9 +1,2 @@
-PyQt5==5.15.10
-# Nota: este projeto usa tkinter (incluso no Python padrão) + PyInstaller para build
-# O PyQt5 listado acima NÃO é necessário para este projeto —
-# a interface foi construída com tkinter nativo.
-# Mantenha este arquivo para referência de dependências externas.
-
-pandas>=2.0
-openpyxl>=3.1       # necessário para pandas ler .xlsx
+openpyxl>=3.1       # leitura/escrita de .xlsx (TACO, exportação, template)
 pyinstaller>=6.0    # apenas para gerar o .exe — não vai junto no app final
