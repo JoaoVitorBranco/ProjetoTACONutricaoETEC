@@ -65,6 +65,17 @@ def inicializar_banco():
             alimento_id INTEGER NOT NULL REFERENCES alimentos(id),
             quantidade_g REAL   NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS refeicao_alimentos_custom (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            refeicao_id  INTEGER NOT NULL REFERENCES refeicoes(id) ON DELETE CASCADE,
+            descricao    TEXT    NOT NULL,
+            quantidade_g REAL    NOT NULL,
+            calorias     REAL    NOT NULL DEFAULT 0,
+            proteinas    REAL    NOT NULL DEFAULT 0,
+            lipideos     REAL    NOT NULL DEFAULT 0,
+            carboidratos REAL    NOT NULL DEFAULT 0
+        );
     """)
 
     conn.commit()

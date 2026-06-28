@@ -9,11 +9,24 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from database.db import inicializar_banco
+from database.db import inicializar_banco, get_connection
 from views.tela_home import TelaHome
 from views.tela_configuracao import TelaConfiguracaoCardapio
 from views.tela_montagem import TelaMontagem
 from models.repositorio import carregar_cardapio
+
+
+def _popular_taco_se_vazio():
+    """Na primeira execução, importa automaticamente os alimentos da tabela TACO."""
+    conn = get_connection()
+    count = conn.execute("SELECT COUNT(*) FROM alimentos").fetchone()[0]
+    conn.close()
+    if count == 0:
+        try:
+            from models.repositorio import restaurar_base_taco
+            restaurar_base_taco()
+        except Exception:
+            pass  # Segue sem dados; usuário pode importar manualmente depois
 
 
 class App(tk.Tk):
@@ -24,8 +37,9 @@ class App(tk.Tk):
         self.minsize(800, 560)
         self.configure(bg="#F7F8F5")
 
-        # Inicializa banco na primeira execução
+        # Inicializa banco e popula TACO na primeira execução
         inicializar_banco()
+        _popular_taco_se_vazio()
 
         # Criar menu
         self._criar_menu()

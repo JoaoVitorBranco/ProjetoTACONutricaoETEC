@@ -19,7 +19,7 @@ KCAL_POR_GRAMA = {
 
 @dataclass
 class Alimento:
-    id: int
+    id: Optional[int]
     grupo: str
     descricao: str
     calorias: float      # por 100g

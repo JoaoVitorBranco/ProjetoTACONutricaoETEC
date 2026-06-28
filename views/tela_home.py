@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from views.estilos import *
 from models.repositorio import listar_cardapios, excluir_cardapio, carregar_cardapio
 
@@ -61,6 +61,19 @@ class TelaHome(tk.Frame):
             activebackground=COR_PRIMARIA_DARK,
             activeforeground="white",
         ).pack(side="right")
+
+        tk.Button(
+            topo,
+            text="📥  Importar",
+            font=FONTE_CORPO,
+            bg=COR_ACENTO,
+            fg=COR_TEXTO,
+            relief="flat",
+            padx=12,
+            pady=6,
+            cursor="hand2",
+            command=self._importar_cardapio,
+        ).pack(side="right", padx=(0, PAD_SM))
 
         # ── Tabela ─────────────────────────────────────────────────────────
         frame_tabela = tk.Frame(corpo, bg=COR_FUNDO)
@@ -141,6 +154,19 @@ class TelaHome(tk.Frame):
             command=self._excluir_selecionado,
         ).pack(side="left")
 
+        tk.Button(
+            acoes,
+            text="📤  Exportar",
+            font=FONTE_CORPO,
+            bg=COR_VERDE,
+            fg="white",
+            relief="flat",
+            padx=12,
+            pady=5,
+            cursor="hand2",
+            command=self._exportar_selecionado,
+        ).pack(side="left", padx=(PAD_SM, 0))
+
         self.lbl_vazio = tk.Label(
             corpo,
             text="Nenhum cardápio encontrado. Clique em '+ Novo cardápio' para começar.",
@@ -188,3 +214,58 @@ class TelaHome(tk.Frame):
         if messagebox.askyesno("Confirmar", f"Excluir o cardápio '{nome}'?"):
             excluir_cardapio(int(sel[0]))
             self.carregar_lista()
+
+    def _exportar_selecionado(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Atenção", "Selecione um cardápio para exportar.")
+            return
+
+        from models.repositorio import exportar_cardapio
+
+        cardapio_id = int(sel[0])
+        nome = self.tree.item(sel[0])["values"][0]
+        nome_arquivo = nome.replace(" ", "_").replace("/", "-")
+
+        caminho = filedialog.asksaveasfilename(
+            title="Exportar Cardápio",
+            defaultextension=".cardapio",
+            initialfile=f"{nome_arquivo}.cardapio",
+            filetypes=[("Arquivo de Cardápio", "*.cardapio"), ("Todos os arquivos", "*.*")],
+        )
+        if not caminho:
+            return
+
+        try:
+            exportar_cardapio(cardapio_id, caminho)
+            messagebox.showinfo(
+                "Exportação concluída",
+                f"✅ Cardápio '{nome}' exportado com sucesso!\n\nArquivo:\n{caminho}",
+            )
+        except Exception as e:
+            messagebox.showerror("Erro ao exportar", str(e))
+
+    def _importar_cardapio(self):
+        from models.repositorio import importar_cardapio
+
+        caminho = filedialog.askopenfilename(
+            title="Importar Cardápio",
+            filetypes=[("Arquivo de Cardápio", "*.cardapio"), ("Todos os arquivos", "*.*")],
+        )
+        if not caminho:
+            return
+
+        try:
+            resultado = importar_cardapio(caminho)
+
+            msg = f"✅ Cardápio '{resultado['nome']}' importado com sucesso!\n\n"
+            msg += f"🔗 Alimentos resolvidos no banco local: {resultado['resolvidos']}\n"
+            if resultado["custom"] > 0:
+                msg += f"✎  Alimentos salvos como personalizados: {resultado['custom']}\n"
+                msg += "\nAlimentos personalizados são itens que não foram encontrados\n"
+                msg += "no banco de dados local. Aparecem com ✎ na montagem."
+
+            messagebox.showinfo("Importação concluída", msg)
+            self.carregar_lista()
+        except Exception as e:
+            messagebox.showerror("Erro ao importar", str(e))

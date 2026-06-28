@@ -1,17 +1,26 @@
+import unicodedata
 from typing import List, Optional
 from database.db import get_connection
 from models.modelos import Alimento, Cardapio, Refeicao, ItemRefeicao
+
+
+def _sem_acento(texto: str) -> str:
+    """Remove acentos e converte para minúsculas — usada como função SQL."""
+    if not texto:
+        return ""
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").lower()
 
 
 # ── Alimentos ─────────────────────────────────────────────────────────────────
 
 def buscar_alimentos(termo: str = "", grupo: str = "") -> List[Alimento]:
     conn = get_connection()
+    conn.create_function("sem_acento", 1, _sem_acento)
     cursor = conn.cursor()
     query = "SELECT * FROM alimentos WHERE 1=1"
     params = []
     if termo:
-        query += " AND descricao LIKE ?"
+        query += " AND sem_acento(descricao) LIKE sem_acento(?)"
         params.append(f"%{termo}%")
     if grupo:
         query += " AND grupo = ?"
@@ -122,6 +131,27 @@ def carregar_cardapio(cardapio_id: int) -> Optional[Cardapio]:
                 quantidade_g=item_row["quantidade_g"],
             ))
 
+        custom_rows = conn.execute(
+            "SELECT * FROM refeicao_alimentos_custom WHERE refeicao_id = ?",
+            (refeicao.id,),
+        ).fetchall()
+        for crow in custom_rows:
+            alimento_custom = Alimento(
+                id=None,
+                grupo="",
+                descricao=crow["descricao"],
+                calorias=crow["calorias"],
+                proteinas=crow["proteinas"],
+                lipideos=crow["lipideos"],
+                carboidratos=crow["carboidratos"],
+                fonte="custom",
+            )
+            refeicao.itens.append(ItemRefeicao(
+                id=crow["id"],
+                alimento=alimento_custom,
+                quantidade_g=crow["quantidade_g"],
+            ))
+
         cardapio.refeicoes.append(refeicao)
 
     conn.close()
@@ -154,10 +184,20 @@ def salvar_cardapio(cardapio: Cardapio) -> int:
         refeicao_id = cursor.lastrowid
 
         for item in refeicao.itens:
-            cursor.execute(
-                "INSERT INTO refeicao_alimentos (refeicao_id, alimento_id, quantidade_g) VALUES (?, ?, ?)",
-                (refeicao_id, item.alimento.id, item.quantidade_g),
-            )
+            if item.alimento.fonte == 'custom':
+                cursor.execute(
+                    """INSERT INTO refeicao_alimentos_custom
+                       (refeicao_id, descricao, quantidade_g, calorias, proteinas, lipideos, carboidratos)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (refeicao_id, item.alimento.descricao, item.quantidade_g,
+                     item.alimento.calorias, item.alimento.proteinas,
+                     item.alimento.lipideos, item.alimento.carboidratos),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO refeicao_alimentos (refeicao_id, alimento_id, quantidade_g) VALUES (?, ?, ?)",
+                    (refeicao_id, item.alimento.id, item.quantidade_g),
+                )
 
     conn.commit()
     conn.close()
@@ -312,19 +352,60 @@ def contar_alimentos_por_grupo(nome_grupo: str) -> dict:
 
 # ── Exportar / Importar ──────────────────────────────────────────────────────
 
-def exportar_alimentos_para_excel(caminho_arquivo: str) -> int:
-    """Exporta todos os alimentos para um arquivo Excel. Retorna quantidade exportada."""
+def gerar_template_importacao(caminho_arquivo: str):
+    """Gera planilha Excel template com cabeçalhos corretos e linhas de exemplo."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Alimentos"
+
+    colunas = ["Grupo", "Descrição", "Calorias (kcal)", "Proteínas (g)", "Carboidratos (g)", "Lipídeos (g)"]
+    larguras = [28, 42, 16, 15, 17, 15]
+
+    for col_idx, (nome, largura) in enumerate(zip(colunas, larguras), 1):
+        cell = ws.cell(row=1, column=col_idx, value=nome)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="2D6A4F", end_color="2D6A4F", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.column_dimensions[cell.column_letter].width = largura
+
+    ws.row_dimensions[1].height = 20
+    ws.freeze_panes = "A2"
+
+    exemplos = [
+        ["Cereais e derivados",      "Arroz, tipo 1, cozido",    128.0, 2.5, 28.1, 0.2],
+        ["Leguminosas e derivados",  "Feijão carioca, cozido",    76.7, 4.8, 13.6, 0.5],
+        ["Carnes e derivados",       "Frango, peito, grelhado",  159.0, 32.0, 0.0, 3.2],
+    ]
+    for row_idx, row_data in enumerate(exemplos, 2):
+        for col_idx, value in enumerate(row_data, 1):
+            ws.cell(row=row_idx, column=col_idx, value=value)
+
+    wb.save(caminho_arquivo)
+
+
+def exportar_alimentos_para_excel(caminho_arquivo: str, apenas_usuario: bool = False) -> int:
+    """Exporta alimentos para Excel. Se apenas_usuario=True, exporta só fonte='usuario'."""
     import pandas as pd
-    
+
     conn = get_connection()
-    
-    # Query todos os alimentos (SEM a coluna fonte)
-    query = """
-        SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos
-        FROM alimentos
-        ORDER BY grupo, descricao
-    """
-    
+
+    if apenas_usuario:
+        query = """
+            SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos
+            FROM alimentos
+            WHERE fonte = 'usuario'
+            ORDER BY grupo, descricao
+        """
+    else:
+        query = """
+            SELECT grupo, descricao, calorias, proteinas, carboidratos, lipideos
+            FROM alimentos
+            ORDER BY grupo, descricao
+        """
+
     df = pd.read_sql_query(query, conn)
     conn.close()
     
@@ -393,53 +474,61 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
     
     conn = get_connection()
     cursor = conn.cursor()
-    
+
+    # Carrega grupos uma vez antes do loop (evita 1 query SQL por linha)
+    grupos_existentes = set(listar_grupos())
+
     criados = 0
     atualizados = 0
     erros = 0
     detalhes_erros = []
-    
+
     for idx, row in df.iterrows():
         linha = idx + 2  # +2 porque Excel começa em 1 e tem cabeçalho
-        
+
         try:
-            # Validações
+            # Validações de texto
             grupo = str(row['Grupo']).strip()
             descricao = str(row['Descrição']).strip()
-            
+
             if not grupo or grupo == 'nan':
                 raise ValueError("Grupo vazio")
             if not descricao or descricao == 'nan':
                 raise ValueError("Descrição vazia")
-            
+
             calorias = float(row['Calorias (kcal)'])
             proteinas = float(row['Proteínas (g)'])
             carboidratos = float(row['Carboidratos (g)'])
             lipideos = float(row['Lipídeos (g)'])
-            
+
             if any(v < 0 for v in [calorias, proteinas, carboidratos, lipideos]):
                 raise ValueError("Valores negativos")
-            
+
+            if proteinas + carboidratos + lipideos > 100:
+                raise ValueError(
+                    f"Soma de macros ({proteinas + carboidratos + lipideos:.1f}g) excede 100g por 100g de alimento"
+                )
+
             # Determina fonte: verifica se está na TACO embutida
             chave = (grupo.lower(), descricao.lower())
             fonte = 'taco' if chave in alimentos_taco else 'usuario'
-            
-            # Cria grupo se não existir
-            grupos_existentes = listar_grupos()
+
+            # Cria grupo se não existir (usando set em memória — sem query extra por linha)
             if grupo not in grupos_existentes:
                 try:
                     criar_grupo(grupo)
-                except:
-                    pass  # Grupo já existe ou foi criado por outra linha
-            
+                    grupos_existentes.add(grupo)
+                except (ValueError, Exception) as e:
+                    if 'já existe' not in str(e).lower():
+                        raise
+
             # Verifica se alimento já existe (grupo + descrição, case-insensitive)
             existe = cursor.execute("""
-                SELECT id, fonte FROM alimentos 
+                SELECT id, fonte FROM alimentos
                 WHERE LOWER(grupo) = LOWER(?) AND LOWER(descricao) = LOWER(?)
             """, (grupo, descricao)).fetchone()
-            
+
             if existe:
-                # Atualiza (mantém a fonte original)
                 cursor.execute("""
                     UPDATE alimentos
                     SET calorias = ?, proteinas = ?, lipideos = ?, carboidratos = ?
@@ -447,13 +536,12 @@ def importar_alimentos_de_excel(caminho_arquivo: str) -> dict:
                 """, (calorias, proteinas, lipideos, carboidratos, existe['id']))
                 atualizados += 1
             else:
-                # Cria novo com fonte determinada
                 cursor.execute("""
                     INSERT INTO alimentos (grupo, descricao, calorias, proteinas, lipideos, carboidratos, fonte)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (grupo, descricao, calorias, proteinas, lipideos, carboidratos, fonte))
                 criados += 1
-        
+
         except Exception as e:
             erros += 1
             detalhes_erros.append(f"Linha {linha}: {str(e)}")
@@ -563,5 +651,145 @@ def restaurar_base_taco() -> int:
     
     conn.commit()
     conn.close()
-    
+
     return restaurados
+
+
+# ── Exportar / Importar Cardápio ─────────────────────────────────────────────
+
+def exportar_cardapio(cardapio_id: int, caminho_arquivo: str) -> str:
+    """Exporta cardápio para JSON com dados nutricionais inline. Retorna nome do cardápio."""
+    import json
+
+    cardapio = carregar_cardapio(cardapio_id)
+    if not cardapio:
+        raise ValueError(f"Cardápio {cardapio_id} não encontrado.")
+
+    dados = {
+        "versao": "1.0",
+        "cardapio": {
+            "nome": cardapio.nome,
+            "kcal_total": cardapio.kcal_total,
+            "data_criacao": cardapio.data_criacao,
+            "refeicoes": [],
+        },
+    }
+
+    for ref in cardapio.refeicoes:
+        ref_dict = {
+            "nome": ref.nome,
+            "percentual": ref.percentual,
+            "ordem": ref.ordem,
+            "itens": [],
+        }
+        for item in ref.itens:
+            ref_dict["itens"].append({
+                "descricao": item.alimento.descricao,
+                "grupo": item.alimento.grupo,
+                "quantidade_g": item.quantidade_g,
+                "calorias": item.alimento.calorias,
+                "proteinas": item.alimento.proteinas,
+                "carboidratos": item.alimento.carboidratos,
+                "lipideos": item.alimento.lipideos,
+                "fonte": item.alimento.fonte,
+            })
+        dados["cardapio"]["refeicoes"].append(ref_dict)
+
+    with open(caminho_arquivo, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=2)
+
+    return cardapio.nome
+
+
+def importar_cardapio(caminho_arquivo: str) -> dict:
+    """
+    Importa cardápio de JSON.
+    Para cada item, tenta resolver no banco local por nome+grupo (sem acento).
+    Itens não encontrados são salvos como custom (dados inline).
+    Retorna dict: {cardapio_id, nome, resolvidos, custom}
+    """
+    import json
+
+    try:
+        with open(caminho_arquivo, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except Exception as e:
+        raise ValueError(f"Erro ao ler arquivo: {e}")
+
+    if "versao" not in dados or "cardapio" not in dados:
+        raise ValueError("Formato inválido: arquivo não é um cardápio exportado pelo sistema.")
+
+    raw = dados["cardapio"]
+
+    for campo in ("nome", "kcal_total", "refeicoes"):
+        if campo not in raw:
+            raise ValueError(f"Arquivo inválido: campo '{campo}' ausente.")
+
+    conn = get_connection()
+    conn.create_function("sem_acento", 1, _sem_acento)
+
+    resolvidos = 0
+    custom = 0
+    refeicoes = []
+
+    for i, ref_raw in enumerate(raw["refeicoes"]):
+        if "nome" not in ref_raw or "percentual" not in ref_raw:
+            raise ValueError(f"Refeição {i+1} inválida: campos 'nome' ou 'percentual' ausentes.")
+
+        itens = []
+        for j, item_raw in enumerate(ref_raw.get("itens", [])):
+            if "descricao" not in item_raw or "quantidade_g" not in item_raw:
+                raise ValueError(f"Item {j+1} da refeição '{ref_raw['nome']}' inválido.")
+
+            descricao = item_raw["descricao"]
+            grupo = item_raw.get("grupo", "")
+
+            # Tenta resolver no banco local (sem acento, case-insensitive)
+            row = conn.execute("""
+                SELECT * FROM alimentos
+                WHERE sem_acento(descricao) = sem_acento(?)
+                  AND sem_acento(grupo) = sem_acento(?)
+                LIMIT 1
+            """, (descricao, grupo)).fetchone()
+
+            if row:
+                alimento = Alimento(
+                    id=row["id"],
+                    grupo=row["grupo"],
+                    descricao=row["descricao"],
+                    calorias=row["calorias"],
+                    proteinas=row["proteinas"],
+                    lipideos=row["lipideos"],
+                    carboidratos=row["carboidratos"],
+                    fonte=row["fonte"],
+                )
+                resolvidos += 1
+            else:
+                alimento = Alimento(
+                    id=None,
+                    grupo=grupo,
+                    descricao=descricao,
+                    calorias=float(item_raw.get("calorias", 0)),
+                    proteinas=float(item_raw.get("proteinas", 0)),
+                    lipideos=float(item_raw.get("lipideos", 0)),
+                    carboidratos=float(item_raw.get("carboidratos", 0)),
+                    fonte="custom",
+                )
+                custom += 1
+
+            itens.append(ItemRefeicao(alimento=alimento, quantidade_g=float(item_raw["quantidade_g"])))
+
+        refeicoes.append(Refeicao(
+            nome=ref_raw["nome"],
+            percentual=float(ref_raw["percentual"]),
+            kcal_diaria=float(raw["kcal_total"]),
+            itens=itens,
+            ordem=int(ref_raw.get("ordem", i)),
+        ))
+
+    conn.close()
+
+    cardapio = Cardapio(nome=raw["nome"], kcal_total=float(raw["kcal_total"]), refeicoes=refeicoes)
+    cardapio_id = salvar_cardapio(cardapio)
+
+    return {"cardapio_id": cardapio_id, "nome": raw["nome"], "resolvidos": resolvidos, "custom": custom}

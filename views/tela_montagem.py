@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from views.estilos import *
-from models.modelos import ItemRefeicao
+from models.modelos import Alimento, ItemRefeicao
 from models.repositorio import buscar_alimentos, listar_grupos, salvar_cardapio
 
 
@@ -163,6 +163,102 @@ class TelaMontagem(tk.Frame):
             frame_busca, text="+ Adicionar", font=FONTE_CORPO,
             bg=COR_PRIMARIA, fg="white", relief="flat", padx=10, pady=3,
             cursor="hand2", command=_adicionar_alimento,
+        ).pack(side="left")
+
+        # ── Alimento personalizado ─────────────────────────────────────────
+        def _adicionar_custom():
+            dialog = tk.Toplevel(self)
+            dialog.title("Adicionar Alimento Personalizado")
+            dialog.geometry("420x360")
+            dialog.resizable(False, False)
+            dialog.transient(self)
+            dialog.grab_set()
+            dialog.configure(bg=COR_FUNDO)
+
+            frame = tk.Frame(dialog, bg=COR_FUNDO_CARD, padx=PAD * 2, pady=PAD)
+            frame.pack(fill="both", expand=True, padx=PAD, pady=PAD)
+
+            # Aviso: alimento fica só no cardápio, não no banco de dados
+            aviso = tk.Label(
+                frame,
+                text="ℹ️  Este alimento ficará registrado apenas neste cardápio.\n"
+                     "Ele não será salvo na base de dados do aplicativo.",
+                font=FONTE_PEQUENA, bg=COR_AMARELO_LIGHT, fg=COR_TEXTO,
+                pady=PAD_SM, padx=PAD_SM, justify="left", wraplength=360,
+            )
+            aviso.pack(fill="x", pady=(0, PAD))
+
+            campos = {}
+            for label, chave in [
+                ("Nome:", "descricao"),
+                ("Quantidade (g):", "quantidade"),
+                ("Calorias (kcal/100g):", "calorias"),
+                ("Proteínas (g/100g):", "proteinas"),
+                ("Carboidratos (g/100g):", "carboidratos"),
+                ("Lipídeos (g/100g):", "lipideos"),
+            ]:
+                f = tk.Frame(frame, bg=COR_FUNDO_CARD)
+                f.pack(fill="x", pady=2)
+                tk.Label(f, text=label, font=FONTE_CORPO, width=22, anchor="w",
+                         bg=COR_FUNDO_CARD, fg=COR_TEXTO).pack(side="left")
+                ent = tk.Entry(f, font=FONTE_CORPO, relief="solid", bd=1)
+                ent.pack(side="left", fill="x", expand=True)
+                campos[chave] = ent
+
+            def _confirmar():
+                descricao = campos["descricao"].get().strip()
+                if not descricao:
+                    messagebox.showwarning("Atenção", "Informe a descrição.", parent=dialog)
+                    return
+                try:
+                    qtd = float(campos["quantidade"].get())
+                    calorias = float(campos["calorias"].get())
+                    proteinas = float(campos["proteinas"].get())
+                    carboidratos = float(campos["carboidratos"].get())
+                    lipideos = float(campos["lipideos"].get())
+                    if qtd <= 0:
+                        raise ValueError("Quantidade deve ser maior que zero.")
+                    if any(v < 0 for v in [calorias, proteinas, carboidratos, lipideos]):
+                        raise ValueError("Valores nutricionais não podem ser negativos.")
+                    if proteinas + carboidratos + lipideos > 100:
+                        raise ValueError(
+                            f"Soma de macros ({proteinas+carboidratos+lipideos:.1f}g) excede 100g por 100g."
+                        )
+                except ValueError as e:
+                    messagebox.showwarning("Atenção", str(e), parent=dialog)
+                    return
+
+                alimento_custom = Alimento(
+                    id=None, grupo="",
+                    descricao=descricao,
+                    calorias=calorias,
+                    proteinas=proteinas,
+                    lipideos=lipideos,
+                    carboidratos=carboidratos,
+                    fonte="custom",
+                )
+                refeicao.itens.append(ItemRefeicao(alimento=alimento_custom, quantidade_g=qtd))
+                dialog.destroy()
+                _atualizar_tabela()
+
+            frame_btns = tk.Frame(frame, bg=COR_FUNDO_CARD)
+            frame_btns.pack(fill="x", pady=(PAD, 0))
+            tk.Button(frame_btns, text="Cancelar", font=FONTE_CORPO,
+                      bg=COR_BORDA, fg=COR_TEXTO, relief="flat", padx=12, pady=6,
+                      cursor="hand2", command=dialog.destroy).pack(side="left")
+            tk.Button(frame_btns, text="✓ Adicionar", font=FONTE_CORPO_B,
+                      bg=COR_PRIMARIA, fg="white", relief="flat", padx=12, pady=6,
+                      cursor="hand2", command=_confirmar).pack(side="right")
+            campos["descricao"].focus()
+
+        frame_link_custom = tk.Frame(card, bg=COR_FUNDO_CARD)
+        frame_link_custom.pack(fill="x", pady=(0, PAD_SM))
+        tk.Button(
+            frame_link_custom,
+            text="+ Adicionar alimento personalizado",
+            font=FONTE_PEQUENA, bg=COR_FUNDO_CARD, fg=COR_ACENTO,
+            relief="flat", padx=0, pady=1, cursor="hand2",
+            command=_adicionar_custom, anchor="w",
         ).pack(side="left")
 
         # ── Tabela de alimentos ────────────────────────────────────────────
@@ -368,17 +464,19 @@ class TelaMontagem(tk.Frame):
         def _atualizar_tabela():
             for row in tree.get_children():
                 tree.delete(row)
+            tree.tag_configure("custom", background=COR_AMARELO_LIGHT)
             for item in refeicao.itens:
                 m = item.macros
+                is_custom = item.alimento.fonte == 'custom'
                 tree.insert("", "end", values=(
-                    item.alimento.descricao,
-                    item.alimento.grupo,
+                    f"{item.alimento.descricao} ✎" if is_custom else item.alimento.descricao,
+                    "(personalizado)" if is_custom else item.alimento.grupo,
                     f"{item.quantidade_g:.1f}",
                     f"{m['calorias']:.1f}",
                     f"{m['proteinas']:.1f}",
                     f"{m['carboidratos']:.1f}",
                     f"{m['lipideos']:.1f}",
-                ))
+                ), tags=("custom",) if is_custom else ())
 
             totais = refeicao.totais
             validacao = refeicao.validacao

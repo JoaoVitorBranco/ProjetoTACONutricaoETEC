@@ -55,6 +55,7 @@ class TelaConfiguracaoCardapio(tk.Frame):
         self.entrada_kcal = tk.Entry(grade, font=FONTE_CORPO, width=10,
                                      relief="solid", bd=1)
         self.entrada_kcal.grid(row=0, column=3, sticky="w")
+        self.entrada_kcal.bind("<KeyRelease>", lambda e: self._atualizar_soma())
         tk.Label(grade, text="kcal", font=FONTE_CORPO,
                  bg=COR_FUNDO_CARD, fg=COR_TEXTO_MUTED).grid(row=0, column=4, padx=(4, 0))
 
@@ -65,18 +66,21 @@ class TelaConfiguracaoCardapio(tk.Frame):
         )
         frame_ref.pack(fill="both", expand=True, pady=(0, PAD))
 
-        # Cabeçalho da tabela
-        cabecalho = tk.Frame(frame_ref, bg=COR_PRIMARIA)
-        cabecalho.pack(fill="x")
-        for texto, peso in [("Nome da refeição", 3), ("% das kcal diárias", 2), ("Kcal calculadas", 2), ("", 1)]:
-            tk.Label(
-                cabecalho, text=texto, font=FONTE_CORPO_B,
-                bg=COR_PRIMARIA, fg="white", pady=6
-            ).pack(side="left", expand=True, fill="x")
+        # Frame unificado: cabeçalho + linhas compartilham o mesmo grid
+        self.frame_tabela = tk.Frame(frame_ref, bg=COR_FUNDO_CARD)
+        self.frame_tabela.pack(fill="x")
+        self.frame_tabela.columnconfigure(0, weight=4)
+        self.frame_tabela.columnconfigure(1, weight=2)
+        self.frame_tabela.columnconfigure(2, weight=2)
+        self.frame_tabela.columnconfigure(3, weight=0, minsize=50)
 
-        # Container das linhas
-        self.frame_linhas = tk.Frame(frame_ref, bg=COR_FUNDO_CARD)
-        self.frame_linhas.pack(fill="both", expand=True, pady=(PAD_SM, 0))
+        for col, txt in enumerate(["Nome da refeição", "% das kcal diárias", "Kcal calculadas", ""]):
+            tk.Label(
+                self.frame_tabela, text=txt, font=FONTE_CORPO_B,
+                bg=COR_PRIMARIA, fg="white", pady=6, anchor="center",
+            ).grid(row=0, column=col, sticky="ew")
+
+        self._next_row = 1
 
         # Linha de soma + botão adicionar
         rodape = tk.Frame(frame_ref, bg=COR_FUNDO_CARD)
@@ -132,31 +136,39 @@ class TelaConfiguracaoCardapio(tk.Frame):
     # ── Linhas de refeição ────────────────────────────────────────────────────
 
     def _adicionar_linha(self, nome="", percentual=""):
-        linha = tk.Frame(self.frame_linhas, bg=COR_FUNDO_CARD, pady=3)
-        linha.pack(fill="x")
+        row = self._next_row
+        self._next_row += 1
 
-        ent_nome = tk.Entry(linha, font=FONTE_CORPO, width=22, relief="solid", bd=1)
+        ent_nome = tk.Entry(self.frame_tabela, font=FONTE_CORPO, relief="solid", bd=1)
         ent_nome.insert(0, nome)
-        ent_nome.pack(side="left", padx=(0, PAD_SM))
+        ent_nome.grid(row=row, column=0, sticky="ew", padx=(4, 2), pady=3)
 
-        ent_pct = tk.Entry(linha, font=FONTE_CORPO, width=8, relief="solid", bd=1)
+        pct_frame = tk.Frame(self.frame_tabela, bg=COR_FUNDO_CARD)
+        pct_frame.grid(row=row, column=1, sticky="ew", padx=2, pady=3)
+        tk.Label(pct_frame, text="%", font=FONTE_CORPO,
+                 bg=COR_FUNDO_CARD, fg=COR_TEXTO_MUTED).pack(side="right", padx=(2, 4))
+        ent_pct = tk.Entry(pct_frame, font=FONTE_CORPO, relief="solid", bd=1)
         ent_pct.insert(0, str(percentual))
-        ent_pct.pack(side="left", padx=(0, 4))
-        tk.Label(linha, text="%", font=FONTE_CORPO, bg=COR_FUNDO_CARD,
-                 fg=COR_TEXTO_MUTED).pack(side="left", padx=(0, PAD_SM))
+        ent_pct.pack(side="left", fill="x", expand=True, padx=(4, 2))
 
-        lbl_kcal = tk.Label(linha, text="—", font=FONTE_MONO, width=12,
-                             bg=COR_AMARELO_LIGHT, fg=COR_TEXTO, relief="flat")
-        lbl_kcal.pack(side="left", padx=(0, PAD_SM))
+        lbl_kcal = tk.Label(self.frame_tabela, text="—", font=FONTE_MONO,
+                             bg=COR_AMARELO_LIGHT, fg=COR_TEXTO, anchor="center")
+        lbl_kcal.grid(row=row, column=2, sticky="ew", padx=2, pady=3)
 
         btn_rem = tk.Button(
-            linha, text="✕", font=FONTE_PEQUENA,
+            self.frame_tabela, text="✕", font=FONTE_PEQUENA,
             bg=COR_VERMELHO, fg="white", relief="flat", padx=6,
             cursor="hand2",
         )
-        btn_rem.pack(side="left")
+        btn_rem.grid(row=row, column=3, padx=(2, 4), pady=3)
 
-        dados = {"frame": linha, "nome": ent_nome, "pct": ent_pct, "kcal_lbl": lbl_kcal}
+        dados = {
+            "row": row,
+            "nome": ent_nome,
+            "pct": ent_pct,
+            "kcal_lbl": lbl_kcal,
+            "widgets": [ent_nome, pct_frame, lbl_kcal, btn_rem],
+        }
         self._linhas_refeicao.append(dados)
 
         btn_rem.config(command=lambda d=dados: self._remover_linha(d))
@@ -165,7 +177,9 @@ class TelaConfiguracaoCardapio(tk.Frame):
         self._atualizar_soma()
 
     def _remover_linha(self, dados):
-        dados["frame"].destroy()
+        for w in dados["widgets"]:
+            w.grid_forget()
+            w.destroy()
         self._linhas_refeicao.remove(dados)
         self._atualizar_soma()
 
@@ -198,7 +212,9 @@ class TelaConfiguracaoCardapio(tk.Frame):
 
         # Remove linhas vazias padrão
         for d in self._linhas_refeicao[:]:
-            d["frame"].destroy()
+            for w in d["widgets"]:
+                w.grid_forget()
+                w.destroy()
         self._linhas_refeicao.clear()
 
         for ref in self.cardapio.refeicoes:

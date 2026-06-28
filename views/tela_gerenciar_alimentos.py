@@ -76,13 +76,21 @@ class TelaGerenciarAlimentos(tk.Toplevel):
                   bg=COR_PRIMARIA, fg="white", relief="flat", padx=12, pady=6,
                   cursor="hand2", command=self._adicionar_alimento).pack(side="left", padx=(0, PAD_SM))
         
-        tk.Button(frame_btns, text="📤 Exportar", font=FONTE_CORPO,
+        tk.Button(frame_btns, text="📤 Exportar tudo", font=FONTE_CORPO,
                   bg=COR_VERDE, fg="white", relief="flat", padx=12, pady=6,
-                  cursor="hand2", command=self._exportar_alimentos).pack(side="left", padx=(0, PAD_SM))
+                  cursor="hand2", command=lambda: self._exportar_alimentos(apenas_usuario=False)).pack(side="left", padx=(0, PAD_SM))
+
+        tk.Button(frame_btns, text="📤 Exportar meus alimentos", font=FONTE_CORPO,
+                  bg=COR_VERDE, fg="white", relief="flat", padx=12, pady=6,
+                  cursor="hand2", command=lambda: self._exportar_alimentos(apenas_usuario=True)).pack(side="left", padx=(0, PAD_SM))
         
         tk.Button(frame_btns, text="📥 Importar", font=FONTE_CORPO,
                   bg=COR_VERDE, fg="white", relief="flat", padx=12, pady=6,
                   cursor="hand2", command=self._importar_alimentos).pack(side="left", padx=(0, PAD_SM))
+
+        tk.Button(frame_btns, text="📋 Template", font=FONTE_CORPO,
+                  bg=COR_ACENTO, fg=COR_TEXTO, relief="flat", padx=12, pady=6,
+                  cursor="hand2", command=self._baixar_template).pack(side="left", padx=(0, PAD_SM))
         
         tk.Button(frame_btns, text="🔄 Restaurar TACO", font=FONTE_CORPO,
                   bg="#FF9800", fg="white", relief="flat", padx=12, pady=6,
@@ -468,31 +476,56 @@ class TelaGerenciarAlimentos(tk.Toplevel):
     
     # ── Exportar / Importar / Restaurar ───────────────────────────────────────
     
-    def _exportar_alimentos(self):
-        """Exporta todos os alimentos para Excel."""
+    def _baixar_template(self):
+        """Exporta planilha template para preenchimento e importação de alimentos."""
+        from tkinter import filedialog
+        from models.repositorio import gerar_template_importacao
+
+        caminho = filedialog.asksaveasfilename(
+            title="Salvar template de importação",
+            defaultextension=".xlsx",
+            initialfile="template_importacao_alimentos.xlsx",
+            filetypes=[("Excel", "*.xlsx"), ("Todos os arquivos", "*.*")],
+        )
+        if not caminho:
+            return
+
+        try:
+            gerar_template_importacao(caminho)
+            messagebox.showinfo(
+                "Template gerado",
+                f"✅ Template salvo com sucesso!\n\nPreencha a partir da linha 2.\n"
+                f"As 3 primeiras linhas são exemplos — pode apagá-las.\n\n{caminho}",
+            )
+        except Exception as e:
+            messagebox.showerror("Erro", str(e))
+
+    def _exportar_alimentos(self, apenas_usuario: bool = False):
+        """Exporta alimentos para Excel. apenas_usuario=True exporta só os cadastrados pelo usuário."""
         from tkinter import filedialog
         from datetime import datetime
         from models.repositorio import exportar_alimentos_para_excel
-        
-        # Sugere nome de arquivo
+
         data_hoje = datetime.now().strftime("%Y%m%d")
-        nome_sugerido = f"alimentos_cardapio_nutricional_{data_hoje}.xlsx"
-        
+        sufixo = "meus_alimentos" if apenas_usuario else "todos_alimentos"
+        nome_sugerido = f"cardapio_nutricional_{sufixo}_{data_hoje}.xlsx"
+
         caminho = filedialog.asksaveasfilename(
             title="Exportar Alimentos",
             defaultextension=".xlsx",
             initialfile=nome_sugerido,
             filetypes=[("Excel", "*.xlsx"), ("Todos os arquivos", "*.*")]
         )
-        
+
         if not caminho:
             return
-        
+
         try:
-            total = exportar_alimentos_para_excel(caminho)
+            total = exportar_alimentos_para_excel(caminho, apenas_usuario=apenas_usuario)
+            tipo = "alimentos personalizados" if apenas_usuario else "alimentos"
             messagebox.showinfo(
                 "Exportação Concluída",
-                f"✅ {total} alimentos exportados com sucesso!\n\nArquivo salvo em:\n{caminho}"
+                f"✅ {total} {tipo} exportados com sucesso!\n\nArquivo salvo em:\n{caminho}"
             )
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao exportar:\n{str(e)}")
