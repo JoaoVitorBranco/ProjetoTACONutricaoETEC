@@ -108,7 +108,9 @@ def carregar_cardapio(cardapio_id: int) -> Optional[Cardapio]:
         )
 
         item_rows = conn.execute("""
-            SELECT ra.id, ra.quantidade_g, a.*
+            SELECT ra.quantidade_g,
+                   a.id, a.grupo, a.descricao, a.calorias,
+                   a.proteinas, a.lipideos, a.carboidratos, a.fonte
             FROM refeicao_alimentos ra
             JOIN alimentos a ON a.id = ra.alimento_id
             WHERE ra.refeicao_id = ?
@@ -126,7 +128,6 @@ def carregar_cardapio(cardapio_id: int) -> Optional[Cardapio]:
                 fonte=item_row["fonte"],
             )
             refeicao.itens.append(ItemRefeicao(
-                id=item_row["id"],
                 alimento=alimento,
                 quantidade_g=item_row["quantidade_g"],
             ))
