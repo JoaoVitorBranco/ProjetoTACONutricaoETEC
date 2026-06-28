@@ -34,6 +34,12 @@ class TelaMontagem(tk.Frame):
             cursor="hand2", command=self.voltar_cb,
         ).pack(side="left")
 
+        tk.Button(
+            rodape, text="📊  Ver resumo", font=FONTE_CORPO,
+            bg=COR_ACENTO, fg=COR_TEXTO, relief="flat", padx=12, pady=6,
+            cursor="hand2", command=self._abrir_resumo,
+        ).pack(side="left", padx=(PAD_SM, 0))
+
         self.btn_salvar = tk.Button(
             rodape, text="💾  Salvar cardápio completo", font=FONTE_CORPO_B,
             bg=COR_PRIMARIA, fg="white", relief="flat", padx=14, pady=6,
@@ -514,6 +520,10 @@ class TelaMontagem(tk.Frame):
 
         _atualizar_tabela()
         self._cards_refeicao[refeicao.nome]["atualizar"] = _atualizar_tabela
+
+    def _abrir_resumo(self):
+        from views.tela_resumo import TelaResumoCardapio
+        TelaResumoCardapio(self, self.cardapio)
 
     def _atualizar_status_geral(self):
         if self.cardapio.todas_validas:
