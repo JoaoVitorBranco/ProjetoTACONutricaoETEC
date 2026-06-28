@@ -2,6 +2,13 @@ import tkinter as tk
 import sys
 import os
 
+# Windows: força ícone correto na barra de tarefas (evita pena padrão do Python)
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ETEC.CardapioNutricional.1")
+except Exception:
+    pass
+
 # Garante que os módulos locais são encontrados (necessário para PyInstaller)
 if getattr(sys, "frozen", False):
     BASE_DIR = sys._MEIPASS
@@ -36,6 +43,13 @@ class App(tk.Tk):
         self.geometry("960x680")
         self.minsize(800, 560)
         self.configure(bg="#F7F8F5")
+
+        # Ícone da janela
+        try:
+            base = sys._MEIPASS if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+            self.iconbitmap(os.path.join(base, "logo.ico"))
+        except Exception:
+            pass
 
         # Inicializa banco e popula TACO na primeira execução
         inicializar_banco()
